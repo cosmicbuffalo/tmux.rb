@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        ruby: ["3.2", "3.3", "3.4", "4.0"]
+        include:
+          - os: macos-latest
+            ruby: "3.4"
+    env:
+      # Short socket paths: macOS's default TMPDIR can exceed the socket limit.
+      TMPDIR: /tmp
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: brew install tmux
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - run: tmux -V
+      - run: bundle exec rake test
+
+  # The test suite against tmux built from source: the oldest supported
+  # release, the newest release of each later minor version, and tmux's
+  # development branch, which may break before a release and so doesn't fail
+  # the build. Keep the list in sync with TMUX_VERSIONS in the Rakefile.
+  tmux:
+    name: tmux ${{ matrix.tmux }}
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.tmux == 'master' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        tmux: ["3.2a", "3.3a", "3.4", "3.5a", "3.6b", "3.7c", "3.8", "master"]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libevent-dev libncurses-dev bison pkg-config autoconf automake
+      - uses: actions/cache@v4
+        if: matrix.tmux != 'master'
+        with:
+          path: tmp/tmux/${{ matrix.tmux }}
+          key: tmux-${{ matrix.tmux }}-${{ runner.os }}-${{ hashFiles('script/build-tmux') }}
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: echo "$(dirname "$(script/build-tmux ${{ matrix.tmux }})")" >> "$GITHUB_PATH"
+      - run: tmux -V
+      - run: bundle exec rake test
+
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec rake build

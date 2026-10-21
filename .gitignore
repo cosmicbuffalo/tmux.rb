@@ -1,0 +1,6 @@
+/.bundle/
+/pkg/
+/.ruby-lsp/
+/Gemfile.lock
+*.gem
+/tmp/

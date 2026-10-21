@@ -1,0 +1,4 @@
+#!/usr/bin/env ruby
+
+# Another name for tmux.rb.
+load File.expand_path("tmux.rb", __dir__)

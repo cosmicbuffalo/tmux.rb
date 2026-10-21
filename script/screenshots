@@ -1,0 +1,298 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Renders the README screenshots from real tmux sessions.
+#
+# Each scene in docs/screenshots/scenes.rb renders one README example: the
+# Ruby code block that follows an `<!-- example: NAME -->` marker. The script
+# compiles that code, starts a throwaway tmux server with fixed windows and
+# pane contents, attaches a real terminal to it with VHS (xterm.js in headless
+# Chromium, https://github.com/charmbracelet/vhs), presses any keys the scene
+# lists, and saves docs/images/SCENE.png. Unless a scene asks for the full
+# screen, the image is cropped to the status line.
+#
+#   script/screenshots              # every scene
+#   script/screenshots status-left  # just the named scenes
+#
+# Needs tmux, vhs, ttyd, and ffmpeg. The Nerd Font used for Powerline glyphs is
+# downloaded (checksum-verified) into tmp/screenshots and exposed to Chromium
+# through a private fontconfig file, so nothing is installed system-wide.
+# Nothing here touches a running tmux server: every server uses its own socket
+# in a temporary directory.
+
+require "digest"
+require "fileutils"
+require "open3"
+require "tmpdir"
+
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift File.join(ROOT, "lib")
+require "tmux"
+
+README = File.join(ROOT, "README.md")
+MANIFEST = File.join(ROOT, "docs/screenshots/scenes.rb")
+OUTPUT_DIR = File.join(ROOT, "docs/images")
+CACHE_DIR = File.join(ROOT, "tmp/screenshots")
+
+FONT = {
+  url: "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz",
+  sha256: "04d5e8f903693f9dd13e16f867e994834e681eb3c72c0d337a770dcda09010cf",
+  family: "JetBrainsMono Nerd Font Mono",
+  files: %w[JetBrainsMonoNerdFontMono-Regular.ttf JetBrainsMonoNerdFontMono-Bold.ttf
+    JetBrainsMonoNerdFontMono-Italic.ttf OFL.txt]
+}.freeze
+
+# Every scene's terminal looks the same. The theme is one of VHS's built-in
+# themes; it decides how named colors (black, blue, colour0-15, ...) and the
+# default foreground and background look. colour16-255 and #hex colors are
+# the same in every terminal. The README states this.
+TERMINAL = {theme: "Catppuccin Mocha", font_size: 18, padding: 16, width: 1100}.freeze
+
+# Status-only scenes use a terminal three rows tall: the status line is the
+# last row, and a blank row separates it from anything a mode draws in the
+# pane's first row (copy mode's position indicator, for example).
+STATUS_ONLY_HEIGHT = 120
+# Room left above and below the status row when cropping.
+CROP_MARGIN = 12
+
+# Scenes never show the machine's hostname; formats that use it show this.
+HOSTNAME = "laptop"
+
+# Programs a pane can appear to run: each is a symlink to sleep, and
+# #{pane_current_command} reports the name it was started as.
+FAKE_PROGRAMS = %w[nvim vim ruby tail htop zsh bash].freeze
+
+# Applied before every example, so each screenshot shows only what its
+# example configures: a status bar in the terminal's own colors (tmux's
+# default is green), and nothing in it until the example adds something.
+BASE_CONFIG = Tmux.configure do
+  server.terminal_features << ",*:RGB"
+  global.status.position = :bottom
+  global.status.style = "default"
+  global.status.left = ""
+  global.status.left.length = 100
+  global.status.right = ""
+  global.status.right.length = 100
+  window.status.format = ""
+  window.status.current.format = ""
+  window.status.separator = ""
+end
+
+def run!(*command, env: {}, **options)
+  stdout, stderr, status = Open3.capture3(env, *command, **options)
+  abort "#{command.first} failed: #{stderr}#{stdout}" unless status.success?
+  stdout
+end
+
+def require_tools!
+  missing = %w[tmux vhs ttyd ffmpeg].reject { |tool| system("command -v #{tool} >/dev/null 2>&1") }
+  return if missing.empty?
+
+  abort "script/screenshots needs #{missing.join(', ')} (see docs/screenshots/README.md)"
+end
+
+# The Ruby code block after each `<!-- example: NAME -->` marker, by name.
+def readme_examples
+  File.read(README).scan(/^<!-- example: ([\w-]+) -->\s*\n```ruby\n(.*?)^```$/m).to_h
+end
+
+# Downloads the pinned font once and returns a fontconfig file that adds it to
+# the system's fonts.
+def font_config
+  fonts = File.join(CACHE_DIR, "fonts")
+  unless FONT[:files].all? { |file| File.exist?(File.join(fonts, file)) }
+    FileUtils.mkdir_p(fonts)
+    archive = File.join(CACHE_DIR, File.basename(FONT[:url]))
+    run!("curl", "-sSLf", "-o", archive, FONT[:url])
+    actual = Digest::SHA256.file(archive).hexdigest
+    abort "font checksum mismatch: #{actual}" unless actual == FONT[:sha256]
+    run!("tar", "-xJf", archive, "-C", fonts, *FONT[:files])
+  end
+
+  config = File.join(CACHE_DIR, "fonts.conf")
+  File.write(config, <<~XML)
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+      <dir>#{fonts}</dir>
+      <cachedir>#{File.join(CACHE_DIR, 'fontcache')}</cachedir>
+    </fontconfig>
+  XML
+  config
+end
+
+# Evaluates an example with $HOME pointing at the fake home, so "~/"
+# substitutions match the panes' directories. A format example becomes the
+# value of the scene's options. Plugin and script commands are replaced with
+# no-ops and the hostname with a fixed name.
+def compile(scene, code, home, directory)
+  path = File.join(directory, "example.rb")
+  File.write(path, code)
+  original_home = ENV["HOME"]
+  ENV["HOME"] = home
+  result = Tmux.load_file(path)
+  if result.is_a?(Tmux::Format)
+    options = Array(scene.fetch(:option) { abort "scene #{scene[:name]} renders a format; give it option:" })
+    result = Tmux.configure do
+      options.each do |name|
+        scope = name.start_with?("window-") ? window : global
+        scope[name] = result
+      end
+    end
+  end
+  "#{BASE_CONFIG.to_tmux}#{result.to_tmux}"
+    .gsub(/^run-shell .*$/, 'run-shell "true"')
+    .gsub(/(?<!#)#H|#\{host\}/, HOSTNAME)
+    .gsub(/(?<!#)#h|#\{host_short\}/, HOSTNAME)
+ensure
+  ENV["HOME"] = original_home
+end
+
+def fake_programs(directory)
+  bin = File.join(directory, "bin")
+  FileUtils.mkdir_p(bin)
+  sleep_path = run!("sh", "-c", "command -v sleep").strip
+  FAKE_PROGRAMS.each { |name| File.symlink(sleep_path, File.join(bin, name)) }
+  bin
+end
+
+# A pane shows fixed text with the cursor hidden, then idles as `command`.
+def pane_command(directory, index, window)
+  program = File.join(directory, "bin", window.fetch(:command, "zsh"))
+  abort "unknown pane command: #{window[:command]} (add it to FAKE_PROGRAMS)" unless File.exist?(program)
+
+  script = File.join(directory, "pane-#{index}.sh")
+  File.write(script, idle_script(program, window.fetch(:content, "")))
+  "sh #{script}"
+end
+
+# Hides the cursor, prints `content` (if any), and idles as `program`. An
+# empty pane prints nothing, so the cursor stays on its first row.
+def idle_script(program, content = "")
+  text = content.empty? ? "" : "cat <<'CONTENT'\n#{content.chomp}\nCONTENT\n"
+  "printf '\\033[?25l\\033[2J\\033[H'\n#{text}exec #{program} 86400\n"
+end
+
+DEFAULT_WINDOWS = [{name: "zsh"}].freeze
+
+# Starts the scene's tmux server, attaches VHS, and writes a screenshot.
+def capture(scene, code, fonts, output)
+  Dir.mktmpdir("tmux-rb-screenshot") do |directory|
+    home = File.join(directory, "home/demo")
+    project = File.join(home, "code/tmux.rb")
+    FileUtils.mkdir_p(project)
+    bin = fake_programs(directory)
+    config = File.join(directory, "scene.conf")
+    File.write(config, compile(scene, code, home, directory))
+
+    socket = File.join(directory, "tmux.sock")
+    environment = {"HOME" => home, "TMUX" => nil}
+    tmux = ->(*arguments) { run!("tmux", "-S", socket, *arguments, env: environment, chdir: project) }
+
+    windows = scene.fetch(:windows, DEFAULT_WINDOWS)
+    begin
+      first, *rest = windows
+      tmux.call("-f", config, "new-session", "-d", "-s", "demo", "-n", first.fetch(:name),
+        "-c", project, "-x", "120", "-y", "20", pane_command(directory, 0, first))
+      rest.each_with_index do |window, index|
+        tmux.call("new-window", "-t", "demo:", "-n", window.fetch(:name), "-c", project,
+          pane_command(directory, index + 1, window))
+      end
+      tmux.call("select-window", "-t", "demo:#{scene.fetch(:select, first.fetch(:name))}")
+      # Setup commands may use %{idle PROGRAM} (a pane idling as PROGRAM,
+      # cursor hidden) and %{project}.
+      scene.fetch(:setup, []).each_with_index do |command, step|
+        tmux.call(*command.map do |part|
+          part.gsub("%{project}", project).gsub(/%\{idle (\w+)\}/) do
+            script = File.join(directory, "setup-#{step}.sh")
+            File.write(script, idle_script(File.join(bin, Regexp.last_match(1))))
+            "sh #{script}"
+          end
+        end)
+      end
+
+      tape = File.join(directory, "scene.tape")
+      File.write(tape, tape_for(scene, socket, output, directory))
+      run!("vhs", tape, env: {"FONTCONFIG_FILE" => fonts})
+    ensure
+      system("tmux", "-S", socket, "kill-server", err: File::NULL, out: File::NULL)
+    end
+  end
+end
+
+def tape_for(scene, socket, output, directory)
+  full = scene[:full]
+  keys = scene.fetch(:keys, []).flat_map { |key| [key, "Sleep 400ms"] }
+  <<~TAPE
+    Output "#{File.join(directory, 'scene.gif')}"
+    Set Shell "bash"
+    Set FontFamily "#{FONT[:family]}"
+    Set FontSize #{TERMINAL[:font_size]}
+    Set Width #{TERMINAL[:width]}
+    Set Height #{full ? scene.fetch(:height, 420) : STATUS_ONLY_HEIGHT}
+    Set Padding #{TERMINAL[:padding]}
+    #{'Set WindowBar Colorful' if full}
+    Set Theme "#{TERMINAL[:theme]}"
+    Hide
+    Type "TMUX= tmux -S #{socket} attach -t demo"
+    Enter
+    Sleep 2s
+    Show
+    #{keys.join("\n")}
+    Sleep 600ms
+    Screenshot "#{output}"
+    Sleep 300ms
+  TAPE
+end
+
+# RGB rows of a PNG, read through ffmpeg.
+def pixel_rows(path, width)
+  raw = run!("ffmpeg", "-v", "error", "-i", path, "-f", "rawvideo", "-pix_fmt", "rgb24", "-")
+  raw.b.scan(/.{#{width * 3}}/mo)
+end
+
+# The pixel rows of the status line in a status-only screenshot. Measured once
+# per run by rendering a status line filled with a known color, since the
+# terminal's cell size depends on the font.
+def status_band(fonts)
+  Dir.mktmpdir("tmux-rb-calibrate") do |directory|
+    output = File.join(directory, "calibrate.png")
+    code = 'Tmux.configure { global.status.style = {bg: "#ff00ff"} }'
+    capture({name: "calibrate"}, code, fonts, output)
+    rows = pixel_rows(output, TERMINAL[:width])
+    # Close to #ff00ff; the screenshot softens the cell's top edge slightly.
+    filled = rows.each_index.select do |y|
+      red, green, blue = rows[y].byteslice(TERMINAL[:width] / 2 * 3, 3).bytes
+      red > 200 && green < 40 && blue > 200
+    end
+    abort "could not find the status line while calibrating" if filled.empty?
+
+    (filled.first..filled.last)
+  end
+end
+
+def crop(path, band)
+  top = [band.first - CROP_MARGIN, 0].max
+  height = band.size + 2 * CROP_MARGIN
+  cropped = "#{path}.crop.png"
+  run!("ffmpeg", "-v", "error", "-y", "-i", path, "-vf", "crop=#{TERMINAL[:width]}:#{height}:0:#{top}", cropped)
+  File.rename(cropped, path)
+end
+
+require_tools!
+scenes = Module.new.module_eval(File.read(MANIFEST), MANIFEST)
+selected = ARGV.empty? ? scenes : scenes.select { |scene| ARGV.include?(scene.fetch(:name)) }
+abort "no scenes named #{ARGV.join(', ')}" if selected.empty?
+examples = readme_examples
+
+FileUtils.mkdir_p(OUTPUT_DIR)
+fonts = font_config
+band = status_band(fonts) unless selected.all? { |scene| scene[:full] }
+selected.each do |scene|
+  code = examples.fetch(scene.fetch(:example)) { abort "README has no <!-- example: #{scene[:example]} -->" }
+  output = File.join(OUTPUT_DIR, "#{scene.fetch(:name)}.png")
+  capture(scene, code, fonts, output)
+  crop(output, band) unless scene[:full]
+  puts "wrote #{output.delete_prefix("#{ROOT}/")}"
+end

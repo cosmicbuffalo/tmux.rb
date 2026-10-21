@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Builds a tmux release (or "master") from source into tmp/tmux/VERSION and
+# prints the path to its binary. Used to run the test suite against tmux
+# versions other than the system's:
+#
+#   PATH="$(dirname "$(script/build-tmux 3.8)"):$PATH" bundle exec rake test
+#
+# Needs a C compiler, make, pkg-config, bison, and the libevent and ncurses
+# development headers; "master" also needs autoconf and automake.
+set -euo pipefail
+
+version="${1:?usage: script/build-tmux VERSION|master}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+prefix="$root/tmp/tmux/$version"
+binary="$prefix/bin/tmux"
+
+if [ -x "$binary" ] && [ "$version" != master ]; then
+  echo "$binary"
+  exit 0
+fi
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+
+if [ "$version" = master ]; then
+  git clone -q --depth 1 https://github.com/tmux/tmux.git src >&2
+  cd src
+  sh autogen.sh >/dev/null
+else
+  curl -sSLf -o tmux.tar.gz "https://github.com/tmux/tmux/releases/download/$version/tmux-$version.tar.gz"
+  tar -xzf tmux.tar.gz
+  cd "tmux-$version"
+fi
+
+./configure --prefix="$prefix" >/dev/null
+make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" >/dev/null 2>&1 || make >&2
+make install >/dev/null
+echo "$binary"

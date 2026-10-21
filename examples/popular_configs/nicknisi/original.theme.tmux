@@ -1,0 +1,199 @@
+#!/bin/bash
+# Tmux theme — follows the active desktop theme.
+#
+# Source: ~/.local/state/theme/current/theme/tmux.sh, rendered by bin/theme from
+# the active pack's colors.toml; colors/{dark,light}.sh when theme has never run.
+# Live reload: bin/theme re-sources tmux.conf on every switch.
+
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# #(...) and run-shell inherit the tmux *server's* PATH, which goes stale across
+# repo moves — so helpers are addressed through the ~/.config/tmux symlink.
+BIN="$HOME/.config/tmux/../../bin"
+
+# Clean slate. Packs set different keys (catppuccin pink/mauve, tokyo-night
+# purple/comment) and `set -g` only overwrites what the new pack names, so a
+# theme switch used to leave the old pack's leftovers for the fallback chains
+# below to find. One batched tmux call unsets every @thm_* first.
+stale=()
+while read -r key _; do stale+=(set-option -gqu "$key" \;); done < <(tmux show-options -g 2>/dev/null | grep '^@thm_')
+((${#stale[@]})) && tmux "${stale[@]:0:${#stale[@]}-1}"
+
+# ── Palette: the rendered pack ──────────────────────────────────────────────
+# bin/theme renders themes/templates/tmux.sh.tpl (a run of `tmux set -gq @thm_*`)
+# into the state dir on every switch, on Linux and macOS alike. The checked-in
+# colors/{dark,light}.sh only cover a machine where theme has never run.
+THEME_TMUX="$HOME/.local/state/theme/current/theme/tmux.sh"
+if [[ -f "$THEME_TMUX" ]]; then
+  # shellcheck disable=SC1090
+  source "$THEME_TMUX"
+else
+  MODE=$(cat "$HOME/.local/state/theme/current/mode" 2>/dev/null || echo dark)
+  # shellcheck disable=SC1090
+  source "$CURRENT_DIR/colors/$MODE.sh"
+fi
+
+# ── Canonical palette ────────────────────────────────────────────────────────
+# Packs name their knobs differently (catppuccin pink/mauve/subtext_0/overlay_0,
+# tokyo-night purple/fg_dark/comment; the rendered tmux.sh speaks tokyo-night), so every
+# colour the status line uses walks a chain and bottoms out in an ANSI name. A
+# fresh server with a pack that lacks a key gets the terminal's own colour, not
+# an empty `fg=` — which tmux rejects, and the whole style with it.
+OPTS=$(tmux show-options -g 2>/dev/null)
+thm() { awk -v k="@thm_$1" '$1 == k { $1 = ""; sub(/^ "?/, ""); sub(/"$/, ""); print; exit }' <<<"$OPTS"; }
+pick() { # pick KEY... LITERAL → first non-empty @thm_KEY, else LITERAL
+  local v
+  while (($# > 1)); do
+    v=$(thm "$1")
+    [[ -n $v ]] && { printf '%s' "$v"; return; }
+    shift
+  done
+  printf '%s' "$1"
+}
+
+c_fg=$(pick fg default)
+c_dim=$(pick fg_dark subtext_0 overlay_2 dark5 colour245)
+c_muted=$(pick comment overlay_0 surface_2 dark3 fg_gutter brightblack)
+c_surface=$(pick bg_highlight surface_0 bg_dark mantle colour236)
+c_ink=$(pick bg base crust black)
+c_red=$(pick red maroon red1 red)
+c_yellow=$(pick yellow yellow)
+c_orange=$(pick orange peach "$c_yellow")
+c_green=$(pick green green1 green)
+c_cyan=$(pick cyan sky blue1 cyan)
+c_teal=$(pick teal green1 "$c_cyan")
+c_blue=$(pick blue sapphire blue1 blue)
+c_lavender=$(pick lavender blue5 blue2 "$c_blue")
+c_magenta=$(pick magenta mauve purple magenta)
+c_pink=$(pick pink flamingo magenta2 "$c_magenta")
+c_purple=$(pick purple mauve "$c_magenta")
+c_accent=$(pick pink mauve purple magenta "$c_cyan")
+
+# Publish for the helpers (bin/tmux-session-mood, bin/tmux-git-status).
+publish=()
+for k in fg dim muted surface ink red yellow orange green cyan teal blue lavender magenta pink purple accent; do
+  v="c_$k"
+  publish+=(set-option -gq "@thm_sl_$k" "${!v}" \;)
+done
+tmux "${publish[@]:0:${#publish[@]}-1}"
+
+# Legacy names for the lines below that keep their original styling — floored
+# so a pack that lacks the key can't hand tmux an empty colour.
+thm_fg_gutter=$(pick fg_gutter surface_0 overlay_0 "$c_muted")
+thm_blue0=$(pick blue0 sapphire "$c_blue")
+
+# Status bar configuration
+tmux set -g status-position top
+tmux set -g status-justify left
+tmux set -g status-left-length 120
+tmux set -g status-right-length 200
+
+# Messages and the `:` prompt stand off the transparent canvas.
+tmux set -g message-style "fg=${c_fg},bg=${c_surface},bold,align=centre"
+tmux set -g message-command-style "fg=${c_accent},bg=${c_surface},bold,align=centre"
+
+# Pane borders
+tmux set-window-option -g pane-active-border-style "fg=${thm_fg_gutter},bg=${thm_fg_gutter}"
+tmux set-window-option -g pane-border-style "fg=${thm_fg_gutter},bg=${thm_fg_gutter}"
+tmux set-window-option -g pane-border-lines simple
+
+# ── Status line ──────────────────────────────────────────────────────────────
+# One transparent row with the original session crests and colourful digits.
+# Sessions keep their hashed colours and sigils, without pill backgrounds.
+# A filled digit and bold name mark the active window. Fleet and bells take
+# precedence over the resting colours.
+# Prefix shows the binding hints; copy mode shows a yellow text label.
+# Badges: ⊕ zoomed, ⇄ synchronized, ⚑ marked, ⧉ shared session.
+#
+# NB: inside #{?...} branches never put a comma inside a #[style] or #(...):
+# tmux splits branches on every comma it sees outside nested #{...}. That is
+# why the formats below write #[fg=x]#[bg=y] as two brackets; script output is
+# spliced in after the split and may use commas freely.
+
+tmux set -g status-style "bg=default,fg=${c_fg}"
+
+# The canvas is the canvas — panes never paint over the terminal's own
+# background (ghostty runs at 0.85 opacity; an opaque pane bg kills it).
+tmux set -g window-style "fg=default,bg=default"
+tmux set -g window-active-style "fg=default,bg=default"
+
+# Glyphs. Nerd-font marks are spelled as UTF-8 bytes so they survive editors.
+FILLED=(➊ ➋ ➌ ➍ ➎ ➏ ➐ ➑ ➒ ➓)
+OUTLINE=(➀ ➁ ➂ ➃ ➄ ➅ ➆ ➇ ➈ ➉)
+BOLT=$'\xf3\xb1\x90\x8b'  # U+F140B nf-md-lightning_bolt
+SSH=$'\xf3\xb0\xa3\x80'   # U+F08C0 nf-md-ssh
+
+# One colour per window slot, cycling the palette — a small rainbow your eye
+# learns ("the green one"). Only the digit is painted; names stay quiet.
+slot_styles=()
+for c in "$c_blue" "$c_cyan" "$c_green" "$c_yellow" "$c_orange" "$c_red" "$c_magenta" "$c_pink" "$c_teal" "$c_lavender"; do
+  slot_styles+=("#[fg=${c}]")
+done
+
+# by_index ELSE V1..V10 → nested #{?#{==:#{window_index},i},Vi,…ELSE}: a lookup
+# table in tmux's own format language, evaluated per window with no shell.
+by_index() {
+  local else=$1 out="" close="" i=1 v
+  shift
+  for v in "$@"; do
+    out+="#{?#{==:#{window_index},${i}},${v},"
+    close+="}"
+    i=$((i + 1))
+  done
+  printf '%s%s%s' "$out" "$else" "$close"
+}
+digit_cur=$(by_index '#I' "${FILLED[@]}")
+digit_oth=$(by_index '#I' "${OUTLINE[@]}")
+slot_fg=$(by_index "#[fg=${c_accent}]" "${slot_styles[@]}")
+
+# Digit colour: prefix hint beats fleet attention beats the slot colour.
+digit_style="#{?client_prefix,#[fg=${c_yellow}],#{?#{@fleet_state},#[fg=#{@fleet_state}],${slot_fg}}}"
+
+# Name colour: bell beats fleet attention beats the resting colour. Names are
+# capped at 32 cells so app-set titles can't flood the bar.
+name='#{?#{window_name},#{=/32/…:window_name},#{b:pane_current_path}}'
+name_cur="#{?window_bell_flag,#[fg=${c_red}],#{?#{@fleet_state},#[fg=#{@fleet_state}],#[fg=${c_fg}]}}#[bold]${name}#[nobold]"
+name_oth="#{?window_bell_flag,#[fg=${c_red}]#[bold],#{?#{@fleet_state},#[fg=#{@fleet_state}]#[bold],#[fg=${c_dim}]}}${name}#[nobold]"
+badges="#{?window_zoomed_flag, #[fg=${c_orange}]⊕,}#{?pane_synchronized, #[fg=${c_red}]⇄,}#{?window_marked_flag, #[fg=${c_accent}]⚑,}"
+
+# Windows keep their original filled/outline digits, with no underlines.
+tmux setw -g window-status-separator "  "
+tmux setw -g window-status-bell-style default # the formats own the bell look
+tmux setw -g window-status-activity-style default
+tmux setw -g window-status-format " ${digit_style}${digit_oth} ${name_oth}${badges} "
+tmux setw -g window-status-current-format " ${digit_style}#[bold]${digit_cur}#[nobold] ${name_cur}${badges} "
+
+# Fleet's window rollup. With this gate on, `fleet status --statusline` (row 1)
+# paints @fleet_state on every window whose agent wants you — yellow ⚠ waiting,
+# magenta ? asking, green ● ready — and unsets it when they don't. The formats
+# above read the option directly, so fleet never has to replace them, and
+# tmux-session-mood reads the same option instead of cold-booting fleet.
+tmux set -g @fleet_rollup 1
+
+# Left: the session crest, or the original yellow bolt while prefix is held.
+# Click the label for the session tree.
+prefix_label="#[fg=${c_yellow}]#[bold]${BOLT} #S#[default]"
+tmux set -g status-left "  #{?client_prefix,${prefix_label},#(${BIN}/tmux-session-mood current '#{session_name}' '#{session_many_attached}')}   "
+
+# Right: ssh host, fleet, copy mode and clickable session labels.
+# Prefix swaps these for the cheat sheet, theme tagline and moon.
+hint() { printf '#[fg=%s]#[bold]%s#[nobold]#[fg=%s] %s' "$c_yellow" "$1" "$c_dim" "$2"; }
+hints="$(hint s sessions)   $(hint g lazygit)   $(hint y fleet)   $(hint n next)   $(hint f sidebar)   $(hint = tile)   $(hint Esc copy)   $(hint T bar)   $(hint r reload)"
+theme_note=""
+if [[ -f "$HOME/.local/state/theme/current/theme/theme.conf" ]]; then
+  theme_note=$(sed -n 's/^TAGLINE="\(.*\)"/\1/p' "$HOME/.local/state/theme/current/theme/theme.conf")
+fi
+# a literal comma inside a #{?} branch must be written #, or it splits the branch
+[[ -n $theme_note ]] && hints+="      #[fg=${c_muted}]#[italics]${theme_note//,/#,}#[noitalics]"
+hints+="  #(${BIN}/tmux-vitals moon)  " # tonight's moon signs the sheet
+mode_label="#{?pane_in_mode,#[fg=${c_yellow}]#[bold]◈ #{s/-mode//:pane_mode}#{?scroll_position, ↑#{scroll_position},}#[default]  ,}"
+others="#(${BIN}/tmux-session-mood others '#{client_session}')"
+chips="#(${BIN}/tmux-fleet-chips)  "
+ssh=""
+[[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]] && ssh="#[fg=${c_dim}]${SSH} #h   "
+tmux set -g status-right "#{?client_prefix,${hints},${ssh}${chips}${mode_label}${others}}"
+tmux set -gu @sl_git 2>/dev/null || true
+tmux set -gu @sl_row1 2>/dev/null || true
+
+# Clock mode
+tmux setw -g clock-mode-colour "${thm_blue0}"
