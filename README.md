@@ -1004,6 +1004,27 @@ Tmux.configure do
 end
 ```
 
+### Comments and hooks
+
+`comment` writes `#` lines into the generated file, for whoever reads or edits
+it. `hook` sets a tmux hook from a command string or a block of commands, as
+`bind` does; `index:` gives it its own slot so setting it again replaces that
+slot rather than adding a copy, and `scope:` picks `:global` (session hooks),
+`:window`, or `:pane`.
+
+```ruby
+Tmux.configure do
+  # # Snapshot sessions whenever one closes.
+  comment "Snapshot sessions whenever one closes."
+
+  # tmux: set-hook -g "session-closed[100]" "run-shell -b \"save-sessions\""
+  hook "session-closed", %q{run-shell -b "save-sessions"}, index: 100
+
+  # tmux: set-hook -gw "pane-focus-in" "display-message \"focused\""
+  hook("pane-focus-in", scope: :window) { display_message "focused" }
+end
+```
+
 ### Raw commands and composition
 
 `raw` passes tmux commands through verbatim (one per line; a trailing `\`

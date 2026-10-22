@@ -358,6 +358,27 @@ class ConfigCompilerTest < Minitest::Test
     end
   end
 
+  def test_comment_writes_one_hash_line_per_line
+    config = Tmux.configure { comment "pmux config\n\nKeep your settings below." }
+
+    assert_equal "# pmux config\n#\n# Keep your settings below.\n", config.to_tmux
+  end
+
+  def test_hook_sets_an_indexed_slot_with_a_quoted_command
+    config = Tmux.configure do
+      hook "session-closed", %q{run-shell -b '"${PMUX_BIN:-pmux}" snapshot || true'}, index: 100
+      hook("pane-focus-in", scope: :window) { display_message "focus $HOME" }
+    end
+
+    with_tmux_server(config.to_tmux) do |tmux|
+      assert_equal %q{session-closed[100] run-shell -b "\"\${PMUX_BIN:-pmux}\" snapshot || true"},
+        tmux.call("show-hooks", "-g", "session-closed").chomp
+      assert_includes tmux.call("show-hooks", "-gw", "pane-focus-in"), "focus"
+    end
+    assert_raises(ArgumentError) { Tmux.configure { hook "x" } }
+    assert_raises(ArgumentError) { Tmux.configure { hook "x", "y", scope: :nope } }
+  end
+
   def test_raw_keeps_continued_lines_in_one_command
     config = Tmux.configure { raw "set -g @a \\\n  1\nset -g @b 2" }
 

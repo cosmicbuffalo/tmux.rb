@@ -10,6 +10,9 @@ First public release, as the `tmux` gem (`require "tmux"`), with the
 - `Tmux.configure` and `Tmux.format` DSLs that compile to deterministic
   tmux configuration and format strings. `Tmux.load_file` evaluates a
   configuration file in its own anonymous module.
+- `comment` writes `#` lines into the generated file, and `hook` sets a
+  tmux hook (command string or block, optional `index:` slot, `:global`,
+  `:window`, or `:pane` scope).
 - `text` with interpolated expressions kept dynamic and everything else
   literal (escaping `#`, and `%` once per conditional nesting level), plus
   `strftime`, `append`, and `#(...)` `command` content, each with its own

@@ -38,6 +38,32 @@ module Tmux
       self
     end
 
+    # A comment in the generated file: one "# " line per line of `text`, and a
+    # bare "#" for an empty one. tmux ignores comments; they are for whoever
+    # reads or edits the generated config.
+    def comment(text)
+      text.to_s.each_line(chomp: true) do |line|
+        @nodes << ConfigNode::Command.new(line.empty? ? "#" : "# #{line}")
+      end
+      self
+    end
+
+    # A hook, as set-hook: `name` fires `command`, a tmux command string or a
+    # block of commands as for #bind. `index:` gives the hook its own slot
+    # (name[index]), so setting it again replaces that slot instead of adding
+    # another copy. `scope:` is :global (session hooks), :window, or :pane.
+    def hook(name, command = nil, index: nil, scope: :global, &block)
+      raise ArgumentError, "hook #{name}: give a command or a block, not both" if command && block
+      raise ArgumentError, "hook #{name}: give a command or a block" unless command || block
+
+      command = commands(&block) if block
+      flag = {global: "-g", window: "-gw", pane: "-gp"}.fetch(scope) do
+        raise ArgumentError, "hook #{name}: scope must be :global, :window, or :pane"
+      end
+      slot = index.nil? ? name.to_s : "#{name}[#{Integer(index)}]"
+      raw "set-hook #{flag} #{ConfigCompiler.quote(slot)} #{ConfigCompiler.quote(command.to_s, expand: false)}"
+    end
+
     # Scoped options are generated from the selected target's complete catalog.
     def global = option_root(:global)
     def server = option_root(:server)
