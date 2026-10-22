@@ -58,7 +58,10 @@ module Tmux
       parts = ["if-shell"]
       parts << "-b" if node.background
       parts << "-F" if node.format
-      parts << self.class.quote(node.test)
+      # A shell test is for the shell: escape $ and a leading ~ so tmux's
+      # parser leaves them alone (it rejects shell syntax such as
+      # ${VAR:-default} in a double-quoted string).
+      parts << self.class.quote(node.test, expand: node.format)
       text = "#{parts.join(' ')} #{block(node.success)}"
       text += " #{block(node.failure)}" unless node.failure.empty?
       text

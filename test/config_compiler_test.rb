@@ -358,6 +358,20 @@ class ConfigCompilerTest < Minitest::Test
     end
   end
 
+  def test_shell_conditions_reach_the_shell_unexpanded
+    config = Tmux.configure do
+      if?(shell(%q{[ "${TMUX_RB_UNSET_VAR:-fallback}" = fallback ] && [ -n "$HOME" ]})) do
+        global[:@shell_test] = "passed"
+      end.else do
+        global[:@shell_test] = "failed"
+      end
+    end
+
+    with_tmux_server(config.to_tmux) do |tmux|
+      assert_equal "passed", tmux.call("show-options", "-gqv", "@shell_test").chomp
+    end
+  end
+
   def test_comment_writes_one_hash_line_per_line
     config = Tmux.configure { comment "pmux config\n\nKeep your settings below." }
 
@@ -372,7 +386,8 @@ class ConfigCompilerTest < Minitest::Test
 
     with_tmux_server(config.to_tmux) do |tmux|
       assert_equal %q{session-closed[100] run-shell -b "\"\${PMUX_BIN:-pmux}\" snapshot || true"},
-        tmux.call("show-hooks", "-g", "session-closed").chomp
+        # tmux 3.4 prints an extra backslash before "$"; the hook is the same.
+        tmux.call("show-hooks", "-g", "session-closed").chomp.gsub("\\\\$", "\\$")
       assert_includes tmux.call("show-hooks", "-gw", "pane-focus-in"), "focus"
     end
     assert_raises(ArgumentError) { Tmux.configure { hook "x" } }
