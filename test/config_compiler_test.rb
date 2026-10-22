@@ -246,6 +246,104 @@ class ConfigCompilerTest < Minitest::Test
     assert_match(/at least one command/, error.message)
   end
 
+  def test_binding_chains_compile_named_commands
+    config = Tmux.configure do
+      bind("-").split(:vertical).cwd("some-dir")
+      bind("|").split(:horizontal, cwd: :current, size: "30%")
+      bind("c").new_window
+      bind("C").new_window(name: "scratch").cwd(:current).select_pane(target: "{last}")
+      bind("h", repeat: true).select_pane(:left)
+      bind("<", repeat: true).resize_pane(:left, 10)
+      bind("M-z", no_prefix: true, note: "Zoom the pane").zoom
+      bind("r").source("~/.tmux.conf").display_message("reloaded")
+      bind("x").kill_pane
+      bind("X", table: "prefix").kill_window
+    end
+
+    assert_equal <<~'TMUX', config.to_tmux
+      bind-key "-" split-window -v -c "some-dir"
+      bind-key "|" split-window -h -l "30%" -c "#{pane_current_path}"
+      bind-key "c" new-window
+      bind-key "C" new-window -n "scratch" -c "#{pane_current_path}" \; select-pane -t "{last}"
+      bind-key -r "h" select-pane -L
+      bind-key -r "<" resize-pane -L 10
+      bind-key -n -N "Zoom the pane" "M-z" resize-pane -Z
+      bind-key "r" source-file "~/.tmux.conf" \; display-message "reloaded"
+      bind-key "x" kill-pane
+      bind-key -T "prefix" "X" kill-window
+    TMUX
+  end
+
+  def test_split_directions_have_short_names
+    short = Tmux.configure do
+      bind("-").split(:v)
+      bind("|").split(:h, cwd: :current)
+    end
+    long = Tmux.configure do
+      bind("-").split(:vertical)
+      bind("|").split(:horizontal, cwd: :current)
+    end
+
+    assert_equal long.to_tmux, short.to_tmux
+  end
+
+  def test_binding_chains_and_blocks_share_named_commands
+    chained = Tmux.configure { bind("-").split(:vertical, cwd: :current).select_pane(:up) }
+    blocked = Tmux.configure do
+      bind "-" do
+        split :vertical
+        cwd :current
+        select_pane :up
+      end
+    end
+
+    assert_equal chained.to_tmux, blocked.to_tmux
+  end
+
+  def test_binding_chains_stay_in_place_and_inside_conditionals
+    config = Tmux.configure do
+      bind("a").new_window
+      global.mouse = true
+      if?(Tmux.host_short == "laptop") { bind("b").zoom }
+    end
+
+    assert_equal <<~'TMUX', config.to_tmux
+      bind-key "a" new-window
+      set-option -g mouse on
+      if-shell -F "#{==:#h,laptop}" {
+        bind-key "b" resize-pane -Z
+      }
+    TMUX
+  end
+
+  def test_binding_chains_load_into_tmux
+    config = Tmux.configure do
+      bind("-").split(:vertical).cwd(:current)
+      bind("c").new_window(name: "scratch")
+      bind("<", repeat: true).resize_pane(:left, 10)
+    end
+
+    with_tmux_server(config.to_tmux) do |tmux|
+      keys = tmux.call("list-keys", "-T", "prefix")
+      assert_match(/split-window -v -c "#\{pane_current_path\}"/, keys)
+      assert_match(/new-window -n scratch/, keys)
+      assert_match(/-r -T prefix\s+<\s+resize-pane -L 10/, keys)
+    end
+  end
+
+  def test_binding_chain_errors
+    errors = {
+      -> { Tmux.configure { bind("q") } } => /bind "q" has no command/,
+      -> { Tmux.configure { bind("q").zoom.cwd(:current) } } => /cwd must follow split or new_window/,
+      -> { Tmux.configure { bind("q").split(:vertical, cwd: "a").cwd("b") } } => /already has a directory/,
+      -> { Tmux.configure { bind("q").split(:sideways) } } => /:vertical \(:v\) or :horizontal \(:h\)/,
+      -> { Tmux.configure { bind("q").select_pane(:north) } } => /:left, :right, :up, or :down/
+    }
+    errors.each do |build, message|
+      assert_match message, assert_raises(Tmux::Error, &build).message
+    end
+  end
+
   def test_raw_format_condition_preserves_background_flag
     config = Tmux.configure do
       if?(Tmux.raw(%q{#{>=:#{version},3.2}}), background: true) do

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Library
+
+- `bind(key)` with no command or block returns a chain of named commands:
+  `bind("-").split(:vertical).cwd(:current)`, `bind("c").new_window`.
+- Named binding commands `split`, `new_window`, `cwd`, `resize_pane`, `zoom`,
+  `kill_pane`, `kill_window`, and `source`, and a direction for
+  `select_pane`. `split` accepts `:vertical`/`:horizontal` or the shorthand
+  `:v`/`:h`. They work in chains and in binding blocks.
+
+### Documentation
+
+- The README opens with a hand-written tmux.conf beside its tmux.rb version,
+  and Examples move up ahead of Why. Tests check that both versions load
+  identically and that the key binding examples match their tmux comments.
+
 ## 0.1.0 (unreleased)
 
 First public release, as the `tmux` gem (`require "tmux"`), with the
