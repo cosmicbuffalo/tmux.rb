@@ -2,7 +2,8 @@
 
 module Tmux
   # The context of a Tmux.configure block. Every DSL method returns the
-  # builder (conditionals return a handle for `.else`), so calls can be chained.
+  # builder (conditionals return a handle for `.else`, and `bind(key)` a
+  # BindingChain), so calls can be chained.
   class ConfigBuilder
     include Evaluation
 
@@ -13,6 +14,7 @@ module Tmux
       @nodes = []
       @else_filled = {}
       @conditional_states = {}
+      @open_bindings = []
     end
 
     def switch(cases) = Tmux.switch(cases)
@@ -102,12 +104,11 @@ module Tmux
       ].compact.join(" ")
     end
 
+    # With neither a command nor a block, bind returns a chain that adds each
+    # command to the binding: `bind("-").split(:vertical).cwd(:current)`.
     def bind(key, command = nil, table: nil, repeat: false, no_prefix: false, note: nil, &block)
       raise Error, "bind cannot combine table: and no_prefix:" if table && no_prefix
       raise Error, "bind accepts either a command or a block, not both" if command && block
-
-      command = commands(&block) if block
-      raise Error, "bind requires a command or block" unless command
 
       parts = ["bind-key"]
       parts << "-r" if repeat
@@ -115,8 +116,17 @@ module Tmux
       parts.concat(["-N", ConfigCompiler.quote(note)]) if note
       parts.concat(["-T", ConfigCompiler.quote(table)]) if table
       parts << ConfigCompiler.quote(key)
-      parts << command
-      raw parts.join(" ")
+      prefix = parts.join(" ")
+
+      unless command || block
+        chain = BindingChain.new(key, prefix, @nodes, @nodes.size)
+        @nodes << ConfigNode::Blank.new # replaced by the chain's first command
+        @open_bindings << chain
+        return chain
+      end
+
+      command = commands(&block) if block
+      raw "#{prefix} #{command}"
     end
 
     # source-file; `quiet: true` (-q) skips a missing file without an error.
@@ -178,7 +188,13 @@ module Tmux
     # package. Splices its nodes in call order.
     def use(component) = append(component.to_config)
 
-    def build = Config.new(@nodes, target: target).validate!
+    def build
+      if (open = @open_bindings.find(&:empty?))
+        raise Error, "bind #{open.key.inspect} has no command: chain one, such as .split(:vertical), or pass a command or block"
+      end
+
+      Config.new(@nodes, target: target).validate!
+    end
 
     private
 

@@ -3,6 +3,55 @@
 tmux.rb is a Ruby DSL that compiles readable, structured block-based
 configuration into native tmux configuration and format strings.
 
+## At a glance
+
+A small, hand-written `~/.tmux.conf`:
+
+<!-- glance: tmux -->
+```tmux
+set -g prefix C-a
+unbind C-b
+bind C-a send-prefix
+
+set -g mouse on
+set -g base-index 1
+setw -g mode-keys vi
+
+bind | split-window -h -c "#{pane_current_path}"
+bind - split-window -v -c "#{pane_current_path}"
+bind r source-file ~/.tmux.conf \; display-message "Reloaded"
+
+set -g status-right "#{?window_zoomed_flag,#[fg=yellow]ZOOM #[fg=default],}#S"
+```
+
+The same configuration in tmux.rb, which compiles to a file tmux loads
+identically:
+
+<!-- glance: ruby -->
+```ruby
+Tmux.configure do
+  global.prefix = "C-a"
+  unbind "C-b"
+  bind("C-a").command(:send_prefix)
+
+  global.mouse = true
+  global.base_index = 1
+  window.mode_keys = :vi
+
+  bind("|").split(:horizontal, cwd: :current)
+  bind("-").split(:vertical, cwd: :current)
+  bind("r").source("~/.tmux.conf").display_message("Reloaded")
+
+  global.status.right = Tmux.format do
+    if?(Tmux.window_zoomed_flag) { style(fg: :yellow) { text "ZOOM " } }
+    text Tmux.session_name
+  end
+end
+```
+
+The payoff grows with the configuration. Status lines are where hand-written
+tmux gets hardest to read, and where the format DSL helps most:
+
 <!-- example: intro -->
 ```ruby
 # ~/.config/tmux/tmux.rb
@@ -19,7 +68,7 @@ Tmux.configure do
     left_segment "#{Tmux.session_name}@#{Tmux.host}", bg: :blue, fg: :black
   end
 
-  bind "|", %q{split-window -h -c "#{pane_current_path}"}
+  bind("|").split(:horizontal, cwd: :current)
 end
 ```
 
@@ -42,6 +91,18 @@ the status bar set to the terminal's own colors. Named colors such as `:blue`,
 `colour16` to `colour255` and hex colors such as `"#ff8800"` look the same
 everywhere. Powerline edges need a font with Powerline glyphs, such as a
 [Nerd Font](https://www.nerdfonts.com).
+
+## Examples
+
+- [examples/author_config.rb](https://github.com/cosmicbuffalo/tmux.rb/blob/main/examples/author_config.rb)
+  is the author's complete tmux configuration: structured status bars, pane
+  borders, and window tabs, plus integration with
+  [tmux-ai-attn](https://github.com/cosmicbuffalo/tmux-ai-attn).
+- [examples/popular_configs](https://github.com/cosmicbuffalo/tmux.rb/blob/main/examples/popular_configs/README.md)
+  contains ten ports of well-known public tmux configurations. Each pinned
+  upstream config sits beside its Ruby version for comparison.
+- [examples/window_status.rb](https://github.com/cosmicbuffalo/tmux.rb/blob/main/examples/window_status.rb)
+  is a standalone format file.
 
 ## Why
 
@@ -825,11 +886,74 @@ end
 
 ### Key bindings
 
-`bind` maps a key to a tmux command string or a block of commands. Use the
-block form to pass command arguments without quoting them by hand.
-`table:` picks a key table, `no_prefix: true` binds without the prefix (`-n`),
-`repeat: true` allows repeating (`-r`), and `note:` adds a description (`-N`).
-`unbind` removes a binding.
+`bind` maps a key to commands. Name the commands in a chain, write a block of
+commands, or pass a tmux command string. `table:` picks a key table,
+`no_prefix: true` binds without the prefix (`-n`), `repeat: true` allows
+repeating (`-r`), and `note:` adds a description (`-N`). `unbind` removes a
+binding.
+
+Given only a key, `bind` returns a chain. Each method adds a command, and
+`cwd` sets the directory for the `split` or `new_window` before it:
+
+```ruby
+Tmux.configure do
+  # tmux: bind-key "-" split-window -v -c "#{pane_current_path}"
+  bind("-").split(:vertical).cwd(:current)
+
+  # tmux: bind-key "|" split-window -h -l "30%" -c "~/src"
+  bind("|").split(:horizontal, size: "30%", cwd: "~/src")
+
+  # tmux: bind-key "c" new-window
+  bind("c").new_window
+
+  # Commands run in order: a named window, then back to the last pane.
+  # tmux: bind-key "C" new-window -n "scratch" -c "#{pane_current_path}" \; select-pane -t "{last}"
+  bind("C").new_window(name: "scratch").cwd(:current).select_pane(target: "{last}")
+
+  # tmux: bind-key -r "h" select-pane -L
+  bind("h", repeat: true).select_pane(:left)
+
+  # tmux: bind-key -r "<" resize-pane -L 10
+  bind("<", repeat: true).resize_pane(:left, 10)
+
+  # tmux: bind-key -n "M-z" resize-pane -Z
+  bind("M-z", no_prefix: true).zoom
+
+  # tmux: bind-key "r" source-file "~/.tmux.conf" \; display-message "Reloaded"
+  bind("r").source("~/.tmux.conf").display_message("Reloaded")
+end
+```
+
+`split` takes tmux's direction names: `:vertical` (`-v`) puts the new pane
+below, and `:horizontal` (`-h`) puts it to the right. `:v` and `:h` are
+shorthand for them. Pane directions are
+`:left`, `:right`, `:up`, and `:down`. The named commands are `split`,
+`new_window`, `select_pane`, `resize_pane`, `zoom`, `kill_pane`,
+`kill_window`, `source`, `display_message`, `display_menu`, `copy_mode`, and
+`load_config`. Use `command` for any other tmux command (its arguments are
+quoted for you) and `raw` for a command written exactly as tmux expects it.
+
+The block form uses the same methods, one command per line, so `cwd` on its
+own line applies to the `split` above it:
+
+```ruby
+Tmux.configure do
+  # tmux: bind-key "|" split-window -h -c "some-dir"
+  bind "|" do
+    split :h # or :horizontal
+    cwd "some-dir"
+  end
+
+  # tmux: bind-key "C" new-window -n "scratch" -c "#{pane_current_path}" \; select-pane -t "{last}"
+  bind "C" do
+    new_window name: "scratch"
+    cwd :current
+    select_pane target: "{last}"
+  end
+end
+```
+
+Command strings pass through as written:
 
 ```ruby
 Tmux.configure do
@@ -869,9 +993,8 @@ Tmux.configure do
 end
 ```
 
-A binding block offers `command` for any tmux command (its arguments are
-quoted for you), `select_pane`, `copy_mode`, `display_message`,
-`display_menu`, `load_config`, and `raw`:
+Blocks suit longer bindings, such as a menu or a command with no named
+helper:
 
 ```ruby
 Tmux.configure do
@@ -888,10 +1011,10 @@ Tmux.configure do
     end
   end
 
-  # Any command, with quoted arguments; select_pane can target a pane.
-  # tmux: bind-key "N" new-window "-c" "#{pane_current_path}" \; select-pane -t "{last}"
-  bind "N" do
-    command :new_window, "-c", "\#{pane_current_path}"
+  # Any command, with quoted arguments.
+  # tmux: bind-key "S" swap-pane "-s" "{last}" \; select-pane -t "{last}"
+  bind "S" do
+    command :swap_pane, "-s", "{last}"
     select_pane target: "{last}"
   end
 
@@ -910,16 +1033,16 @@ return one and several bindings can share it:
 Tmux.configure do
   def split_here(direction)
     commands do
-      command :split_window, direction, "-c", "\#{pane_current_path}"
+      split direction, cwd: :current
       display_message "split"
     end
   end
 
-  # tmux: bind-key "|" split-window "-h" -c "#{pane_current_path}" \; display-message "split"
-  bind "|", split_here("-h")
+  # tmux: bind-key "|" split-window -h -c "#{pane_current_path}" \; display-message "split"
+  bind "|", split_here(:horizontal)
 
-  # tmux: bind-key "-" split-window "-v" -c "#{pane_current_path}" \; display-message "split"
-  bind "-", split_here("-v")
+  # tmux: bind-key "-" split-window -v -c "#{pane_current_path}" \; display-message "split"
+  bind "-", split_here(:vertical)
 end
 ```
 
@@ -1050,18 +1173,6 @@ Tmux.configure do
   use clipboard
 end
 ```
-
-## Examples
-
-- [examples/author_config.rb](https://github.com/cosmicbuffalo/tmux.rb/blob/main/examples/author_config.rb)
-  is the author's complete tmux configuration: structured status bars, pane
-  borders, and window tabs, plus integration with
-  [tmux-ai-attn](https://github.com/cosmicbuffalo/tmux-ai-attn).
-- [examples/popular_configs](https://github.com/cosmicbuffalo/tmux.rb/blob/main/examples/popular_configs/README.md)
-  contains ten ports of well-known public tmux configurations. Each pinned
-  upstream config sits beside its Ruby version for comparison.
-- [examples/window_status.rb](https://github.com/cosmicbuffalo/tmux.rb/blob/main/examples/window_status.rb)
-  is a standalone format file.
 
 ## Development
 
