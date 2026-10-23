@@ -216,7 +216,7 @@ class ConfigCompilerTest < Minitest::Test
     config = Tmux.configure do
       bind "Space" do
         display_menu title: "Quick Actions" do
-          item "Horizontal Split", key: "h", command: "split-window -v"
+          item "Horizontal Split", key: "h", command: "split-window -h"
           separator
           item "Kill Pane", key: "x" do
             command :kill_pane
@@ -226,7 +226,7 @@ class ConfigCompilerTest < Minitest::Test
     end
 
     assert_equal <<~'TMUX', config.to_tmux
-      bind-key "Space" display-menu -T "Quick Actions" "Horizontal Split" "h" "split-window -v" "" "Kill Pane" "x" "kill-pane"
+      bind-key "Space" display-menu -T "Quick Actions" "Horizontal Split" "h" "split-window -h" "" "Kill Pane" "x" "kill-pane"
     TMUX
   end
 
