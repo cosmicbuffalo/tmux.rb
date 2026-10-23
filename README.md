@@ -38,12 +38,16 @@ Tmux.configure do
   global.base_index = 1
   window.mode_keys = :vi
 
-  bind("|").split(:horizontal, cwd: :current)
-  bind("-").split(:vertical, cwd: :current)
-  bind("r").source("~/.tmux.conf").display_message("Reloaded")
+  bind("|").split(:h, cwd: :current)
+  bind("-").split(:v, cwd: :current)
+  bind("r")
+    .source("~/.tmux.conf")
+    .display_message("Reloaded")
 
   global.status.right = Tmux.format do
-    if?(Tmux.window_zoomed_flag) { style(fg: :yellow) { text "ZOOM " } }
+    if?(Tmux.window_zoomed_flag) do
+        style(fg: :yellow) { text "ZOOM " }
+    end
     text Tmux.session_name
   end
 end
