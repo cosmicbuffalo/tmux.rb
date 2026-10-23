@@ -174,6 +174,7 @@ class CLITest < Minitest::Test
   def test_load_renders_to_a_temporary_file_and_sources_it
     target = Tmux.const_get(:Target).current
     version = target.version
+    target.catalog
     Dir.mktmpdir do |directory|
       source = File.join(directory, "config.rb")
       File.write(source, "Tmux.configure { global[:@loaded_by_tmux_rb] = true }\n")
