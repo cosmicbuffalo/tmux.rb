@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Development
+
+- Merging a version bump to main tags it and creates a GitHub release once
+  CI passes on that commit, with the version's CHANGELOG section as the
+  notes (`script/release-notes VERSION` prints it). A test fails if the
+  current version has no CHANGELOG section.
+
 ## 0.2.0 (2026-10-23)
 
 ### Library
