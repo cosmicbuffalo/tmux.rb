@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-23)
 
 ### Library
 
@@ -10,6 +10,15 @@
   `kill_pane`, `kill_window`, and `source`, and a direction for
   `select_pane`. `split` accepts `:vertical`/`:horizontal` or the shorthand
   `:v`/`:h`. They work in chains and in binding blocks.
+- `comment` writes `#` lines into the generated file, and `hook` sets a
+  tmux hook (command string or block, optional `index:` slot, `:global`,
+  `:window`, or `:pane` scope).
+
+### Fixes
+
+- `shell(...)` conditions reach the shell exactly as written. tmux no longer
+  expands `$` variables when the file loads or rejects shell syntax such as
+  `${VAR:-default}`.
 
 ### Documentation
 
@@ -17,7 +26,7 @@
   and Examples move up ahead of Why. Tests check that both versions load
   identically and that the key binding examples match their tmux comments.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-21)
 
 First public release, as the `tmux` gem (`require "tmux"`), with the
 `tmux.rb` command (also installed as `tmux_rb`).
@@ -27,9 +36,6 @@ First public release, as the `tmux` gem (`require "tmux"`), with the
 - `Tmux.configure` and `Tmux.format` DSLs that compile to deterministic
   tmux configuration and format strings. `Tmux.load_file` evaluates a
   configuration file in its own anonymous module.
-- `comment` writes `#` lines into the generated file, and `hook` sets a
-  tmux hook (command string or block, optional `index:` slot, `:global`,
-  `:window`, or `:pane` scope).
 - `text` with interpolated expressions kept dynamic and everything else
   literal (escaping `#`, and `%` once per conditional nesting level), plus
   `strftime`, `append`, and `#(...)` `command` content, each with its own
