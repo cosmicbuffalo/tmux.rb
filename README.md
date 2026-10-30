@@ -1178,6 +1178,41 @@ Tmux.configure do
 end
 ```
 
+### Plugins
+
+A configuration file can `require` the Ruby module of an installed tmux
+plugin by the plugin's name, however it was installed:
+
+```ruby
+require "tmux-ai-attn"
+
+Tmux.configure do
+  use TmuxAiAttn
+end
+```
+
+A plugin opts in by shipping `lib/<its directory name>.rb`, such as
+`tmux-ai-attn/lib/tmux-ai-attn.rb`. tmux.rb looks for plugins in this order;
+each place is either a plugin checkout or a directory of them, and the first
+copy of a plugin found wins:
+
+1. each `--plugin-path DIR` given to `build`, `check`, `diff`, or `load`
+2. each entry of `TMUX_RB_PLUGIN_PATH`, separated by `:` like `PATH`
+3. [TPM](https://github.com/tmux-plugins/tpm)'s plugin directory:
+   `$TMUX_PLUGIN_MANAGER_PATH`, which TPM sets inside tmux, or else
+   `~/.tmux/plugins` and `~/.config/tmux/plugins`
+
+So a plugin installed with TPM needs no setup, and one cloned anywhere else
+needs only its location:
+
+```bash
+TMUX_RB_PLUGIN_PATH=~/src/tmux-ai-attn tmux.rb build tmux.rb --output ~/.tmux.conf
+```
+
+Only opted-in plugins' `lib` directories join Ruby's load path, after the
+entries already there, so `-I` and `RUBYLIB` take precedence. A failed
+`require` reports where tmux.rb looked.
+
 ## Development
 
 ```bash

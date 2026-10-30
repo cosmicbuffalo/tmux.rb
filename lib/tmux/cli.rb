@@ -20,6 +20,7 @@ module Tmux
       @stdout = stdout
       @stderr = stderr
       @tmux_executable = "tmux"
+      @plugin_path = []
     end
 
     def run(arguments)
@@ -125,6 +126,9 @@ module Tmux
         opts.banner = "usage: tmux.rb #{synopsis}"
         yield opts if block_given?
         opts.on("--tmux PATH", "Target this tmux executable (default: tmux on PATH)") { |path| @tmux_executable = path }
+        opts.on("--plugin-path DIR", "Look for plugins in DIR (a plugin or a directory of them) first; repeatable") do |dir|
+          @plugin_path << dir
+        end
         opts.on("-h", "--help", "Show this help") { early = :help }
         opts.on("--version", "Show the tmux.rb version") { early = :version }
       end
@@ -145,14 +149,23 @@ module Tmux
     # Errors raised while the configuration runs are reported with the line
     # in the configuration file that raised them.
     def load_source(path)
-      Tmux.load_file(path, tmux: @tmux_executable)
+      Tmux.load_file(path, tmux: @tmux_executable, plugin_path: @plugin_path)
     rescue SyntaxError => error
       raise Error, error.message
     rescue StandardError, ScriptError => error
       location = location_in(error, File.expand_path(path))
       raise if location.nil? && (error.is_a?(Error) || error.is_a?(SystemCallError))
 
-      raise Error, "#{location || path}: #{error.message} (#{error.class})"
+      raise Error, "#{location || path}: #{error.message} (#{error.class})#{plugin_hint(error)}"
+    end
+
+    # For a failed require: where tmux.rb looked for plugins.
+    def plugin_hint(error)
+      return "" unless error.is_a?(LoadError)
+
+      "\n(plugins are looked up in #{Plugins.search_path(extra: @plugin_path).join(", ")}; " \
+        "add others with --plugin-path or TMUX_RB_PLUGIN_PATH. " \
+        "A plugin is found by name when it ships lib/<its directory name>.rb)"
     end
 
     # The innermost backtrace frame inside the configuration file itself.
