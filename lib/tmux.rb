@@ -18,6 +18,7 @@ require_relative "tmux/config_builder"
 require_relative "tmux/option_tree"
 require_relative "tmux/condition_compiler"
 require_relative "tmux/dsl"
+require_relative "tmux/plugins"
 
 module Tmux
   # Evaluates a configuration file and returns the Tmux::Config or
@@ -25,9 +26,12 @@ module Tmux
   # anonymous module, which keeps its constants and methods out of the global
   # namespace. Configuration files are trusted Ruby: the module is not a
   # sandbox. Logical operators in DSL conditions are captured before Ruby
-  # evaluates them, so && / || build deferred tmux expressions.
-  def self.load_file(path, tmux: nil)
+  # evaluates them, so && / || build deferred tmux expressions. The file can
+  # `require` the Ruby module of an installed plugin by name (see Plugins);
+  # `plugin_path` adds directories to search first.
+  def self.load_file(path, tmux: nil, plugin_path: [])
     target = tmux ? Target.for_executable(tmux) : Target.current
+    Plugins.add_to_load_path(extra: plugin_path)
     Target.with(target) { evaluate_file(path) }
   end
 

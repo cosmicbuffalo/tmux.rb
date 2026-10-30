@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Configuration files can `require` the Ruby module of an installed tmux plugin by name, such as `require "tmux-ai-attn"`. tmux.rb looks in each `--plugin-path`, then `TMUX_RB_PLUGIN_PATH`, then TPM's plugin directory, and adds the `lib` directory of each plugin that ships `lib/<its directory name>.rb` to the end of the load path. The first copy of a plugin found wins.
+
 ## 0.2.0 (2026-10-23)
 
 ### Library
