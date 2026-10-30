@@ -1,0 +1,57 @@
+name: Release
+
+# Tags and releases each version bump merged to main, once CI passes on that
+# commit. A version whose tag already exists is skipped, so ordinary merges
+# do nothing. Publishing the gem to RubyGems stays manual (it needs MFA):
+#
+#   bundle exec rake build && gem push pkg/tmux-VERSION.gem
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Read the version
+        id: version
+        run: |
+          version="$(ruby -e 'require "./lib/tmux/version"; print Tmux::VERSION')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already tagged; nothing to release."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag and release
+        if: steps.version.outputs.new == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          script/release-notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "tmux.rb $VERSION" "$SHA"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --verify-tag --title "tmux.rb $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" --latest
