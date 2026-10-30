@@ -2,7 +2,21 @@
 
 ## Unreleased
 
-- Configuration files can `require` the Ruby module of an installed tmux plugin by name, such as `require "tmux-ai-attn"`. tmux.rb looks in each `--plugin-path`, then `TMUX_RB_PLUGIN_PATH`, then TPM's plugin directory, and adds the `lib` directory of each plugin that ships `lib/<its directory name>.rb` to the end of the load path. The first copy of a plugin found wins.
+### Library
+
+- Configuration files can `require` the Ruby module of an installed tmux
+  plugin by name, such as `require "tmux-ai-attn"`. tmux.rb looks in each
+  `--plugin-path`, then `TMUX_RB_PLUGIN_PATH`, then TPM's plugin directory,
+  and adds the `lib` directory of each plugin that ships
+  `lib/<its directory name>.rb` to the end of the load path. The first copy
+  of a plugin found wins.
+
+### Development
+
+- Merging a version bump to main tags it and creates a GitHub release once
+  CI passes on that commit, with the version's CHANGELOG section as the
+  notes (`script/release-notes VERSION` prints it). A test fails if the
+  current version has no CHANGELOG section.
 
 ## 0.2.0 (2026-10-23)
 
