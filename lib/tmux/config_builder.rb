@@ -185,8 +185,17 @@ module Tmux
 
     # Import another tmux config object into this config. `component` is anything
     # implementing #to_config (returning a Tmux::Config) — e.g. a plugin's Ruby
-    # package. Splices its nodes in call order.
-    def use(component) = append(component.to_config)
+    # package. Splices its nodes in call order, under a comment naming the
+    # component and the file that defines it, so the generated config shows
+    # where each part begins. Use #append to splice without the comment.
+    def use(component)
+      config = component.to_config
+      blank unless @nodes.empty? || @nodes.last.is_a?(ConfigNode::Blank)
+      # A configuration file is evaluated, so its frames have only a path.
+      caller = caller_locations(1, 1).first
+      comment "--- #{component_label(component, caller && (caller.absolute_path || caller.path))} ---"
+      append config
+    end
 
     def build
       if (open = @open_bindings.find(&:empty?))
@@ -221,6 +230,28 @@ module Tmux
       @nodes[index] = @conditional_states.fetch(index).reverse_each.reduce(otherwise) do |failure, branch|
         [branch.with(failure:)]
       end.first
+    end
+
+    # "Name (path)" for #use: a module's own name or an object's class name,
+    # and the file defining its to_config, relative to the calling file's
+    # directory when it is inside it, otherwise with the home directory as ~.
+    def component_label(component, caller_path)
+      name = component.is_a?(Module) ? component.name : component.class.name
+      file = begin
+        component.method(:to_config).source_location&.first
+      rescue NameError # to_config answered by method_missing
+        nil
+      end
+      [name, file && "(#{display_path(file, caller_path)})"].compact.join(" ")
+    end
+
+    def display_path(file, caller_path)
+      file = File.expand_path(file)
+      base = caller_path && "#{File.dirname(caller_path)}/"
+      return file.delete_prefix(base) if base && file.start_with?(base)
+
+      home = "#{Dir.home}/"
+      file.start_with?(home) ? "~/#{file.delete_prefix(home)}" : file
     end
 
     def write_option(name, value, scope:, append: false, expand: true)

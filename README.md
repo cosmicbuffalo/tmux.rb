@@ -658,6 +658,31 @@ end
 
 </details>
 
+### Named segments
+
+`Tmux.segments` holds format blocks under names and compiles them, in order,
+to one format, so part of a configuration can adjust a status line another
+part defines: `insert` a segment `before:` or `after:` a named one, `replace`
+one in place, or `remove` some. Each block is an ordinary format block, and
+all of them run on one builder, so powerline edges join their neighbors as if
+written together. Assign the result to an option like any format.
+
+```ruby
+# Shared by every machine.
+right = Tmux.segments do
+  segment(:path) { left_segment Tmux.pane_current_path, bg: "#2d2d30", fg: :white }
+  segment(:host) { left_segment [Tmux.session_name, "@", Tmux.host], bg: "#5eaceb", fg: :black }
+end
+
+# One machine adds a clock; a phone-sized variant drops the path.
+right.insert(:clock, before: :host) { left_segment(bg: "#4e4e4e", fg: :white) { strftime " %H:%M " } }
+right.remove(:path) if compact
+
+Tmux.configure { global.status.right = right }
+```
+
+An unknown name raises an error listing the segments there are.
+
 ### Expanding options
 
 `expand_option` inserts a user option's value and expands it as a format, for
@@ -1157,7 +1182,10 @@ end
 `raw` passes tmux commands through verbatim (one per line; a trailing `\`
 continues a line), and `blank` adds an empty line. `append` includes another
 configuration's statements, and `use` accepts any object that responds to
-`to_config`, such as a plugin's Ruby package.
+`to_config`, such as a plugin's Ruby package or one part of a configuration
+split across files. `use` writes a comment above the part naming it and the
+file its `to_config` is defined in (relative to the calling file's directory
+when it is inside it), so the generated config shows where each part begins.
 
 ```ruby
 shared = Tmux.configure { global.history_limit = 50_000 } # set-option -g history-limit 50000
@@ -1174,7 +1202,7 @@ Tmux.configure do
 
   # Another configuration's statements, in place.
   append shared
-  use clipboard
+  use clipboard # preceded by "# --- Object (config.rb) ---"
 end
 ```
 

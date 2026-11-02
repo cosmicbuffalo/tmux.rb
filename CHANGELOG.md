@@ -10,6 +10,15 @@
   and adds the `lib` directory of each plugin that ships
   `lib/<its directory name>.rb` to the end of the load path. The first copy
   of a plugin found wins.
+- `use` writes a `# --- Name (file) ---` comment above each component it
+  splices in, naming the component and the file that defines its
+  `to_config`, so the generated config shows where each part begins.
+  `append` still splices without one.
+- `Tmux.segments` holds named format blocks that compile, in order, to one
+  format. `insert` (`before:`/`after:`), `replace`, and `remove` adjust them
+  by name, so one part of a configuration can change a status line another
+  part defines. Options accept them, and anything else with `to_format`, as
+  values.
 
 ### Development
 
