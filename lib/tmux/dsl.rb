@@ -16,6 +16,10 @@ module Tmux
     ConditionalFormat.new(builder, builder.if?(condition, &block))
   end
 
+  # Named format blocks that can be inserted, replaced, or removed by name
+  # before they compile to one format (see Segments).
+  def self.segments(&block) = Segments.new(&block)
+
   # left/centre/right zones assembled into one aligned format (see ZoneBuilder).
   def self.pane_border(&block)
     builder = ZoneBuilder.new

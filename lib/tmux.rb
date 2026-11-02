@@ -19,6 +19,7 @@ require_relative "tmux/option_tree"
 require_relative "tmux/condition_compiler"
 require_relative "tmux/dsl"
 require_relative "tmux/plugins"
+require_relative "tmux/segments"
 
 module Tmux
   # Evaluates a configuration file and returns the Tmux::Config or

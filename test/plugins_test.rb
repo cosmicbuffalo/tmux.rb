@@ -89,7 +89,10 @@ class PluginsTest < Minitest::Test
     ENV["TMUX_PLUGIN_MANAGER_PATH"] = File.join(@root, "tpm")
 
     Dir.mktmpdir do |dir|
-      assert_equal %(set-option -g @greeting "hello"\n), Tmux.load_file(config_using(dir, "tmux-greeter", "TmuxGreeter")).to_tmux
+      assert_equal <<~TMUX, Tmux.load_file(config_using(dir, "tmux-greeter", "TmuxGreeter")).to_tmux
+        # --- TmuxGreeter (#{File.join(@root, "tpm/tmux-greeter/lib/tmux-greeter.rb")}) ---
+        set-option -g @greeting "hello"
+      TMUX
     end
   end
 
@@ -106,7 +109,10 @@ class PluginsTest < Minitest::Test
       status = Tmux::CLI.run(["build", config_using(dir, "tmux-hello", "TmuxHello"), "--plugin-path", File.join(@root, "src")], stdout:, stderr:)
 
       assert_equal 0, status, stderr.string
-      assert_equal %(set-option -g @greeting "hi"\n), stdout.string
+      assert_equal <<~TMUX, stdout.string
+        # --- TmuxHello (#{File.join(@root, "src/tmux-hello/lib/tmux-hello.rb")}) ---
+        set-option -g @greeting "hi"
+      TMUX
     end
   end
 

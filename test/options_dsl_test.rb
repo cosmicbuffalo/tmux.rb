@@ -1,4 +1,5 @@
 require_relative "test_helper"
+require "fileutils"
 
 # Scoped and nested option names keep the same native tmux behavior.
 class OptionsDslTest < Minitest::Test
@@ -94,9 +95,59 @@ class OptionsDslTest < Minitest::Test
     assert_raises(Tmux::Error) { compile { window.pane.unset } }
   end
 
-  def test_use_imports_a_components_config
+  def test_use_imports_a_components_config_under_a_header
     component = Object.new
     def component.to_config = Tmux.configure { global.history_limit = 5000 }
-    assert_equal %(set-option -g history-limit 5000\n), compile { use component }
+    assert_equal <<~TMUX, compile { use component }
+      # --- Object (options_dsl_test.rb) ---
+      set-option -g history-limit 5000
+    TMUX
+  end
+
+  module Keys
+    def self.to_config = Tmux.configure { bind "x", "kill-pane" }
+  end
+
+  def test_use_separates_parts_and_names_a_module_by_its_constant
+    assert_equal <<~TMUX, compile { global.mouse = true; use Keys; use Keys }
+      set-option -g mouse on
+
+      # --- OptionsDslTest::Keys (options_dsl_test.rb) ---
+      bind-key "x" kill-pane
+
+      # --- OptionsDslTest::Keys (options_dsl_test.rb) ---
+      bind-key "x" kill-pane
+    TMUX
+  end
+
+  def test_use_names_a_file_outside_the_callers_directory_from_home
+    Dir.mktmpdir("tmux-rb-use", Dir.home) do |directory|
+      part = File.join(directory, "part.rb")
+      File.write(part, "module UseOutsidePart\n  def self.to_config = Tmux.configure { global.mouse = true }\nend\n")
+      load part
+      header = compile { use UseOutsidePart }.lines.first
+      assert_equal "# --- UseOutsidePart (~/#{part.delete_prefix("#{Dir.home}/")}) ---\n", header
+    ensure
+      Object.send(:remove_const, :UseOutsidePart) if defined?(UseOutsidePart)
+    end
+  end
+
+  def test_use_in_a_configuration_file_names_parts_relative_to_that_file
+    Dir.mktmpdir do |directory|
+      FileUtils.mkdir_p(File.join(directory, "parts"))
+      File.write(File.join(directory, "parts/keys.rb"), "module UseFilePart\n  def self.to_config = Tmux.configure { bind \"x\", \"kill-pane\" }\nend\n")
+      config = File.join(directory, "tmux.rb")
+      File.write(config, %(require_relative "parts/keys"\nTmux.configure { use UseFilePart }\n))
+      assert_equal <<~TMUX, Tmux.load_file(config).to_tmux
+        # --- UseFilePart (parts/keys.rb) ---
+        bind-key "x" kill-pane
+      TMUX
+    ensure
+      Object.send(:remove_const, :UseFilePart) if defined?(UseFilePart)
+    end
+  end
+
+  def test_append_splices_without_a_header
+    assert_equal %(set-option -g mouse on\n), compile { append Tmux.configure { global.mouse = true } }
   end
 end

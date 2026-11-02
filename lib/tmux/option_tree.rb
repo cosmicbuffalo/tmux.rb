@@ -141,6 +141,7 @@ module Tmux
     def write(value, append: false, expand: true)
       name = settable!("assignment")
       value = Tmux.style_string(value) if @descriptor[:style] && value.is_a?(Hash)
+      value = value.to_format if !value.is_a?(Format) && value.respond_to?(:to_format)
       @builder.__send__(:write_option, name, value, scope: @scope, append: append, expand: expand)
     end
   end
