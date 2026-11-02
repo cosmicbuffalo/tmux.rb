@@ -1248,6 +1248,10 @@ bundle install
 bundle exec rake test
 ```
 
+`mise.toml` pins the Ruby that CI packages and releases with (3.4), so with
+[mise](https://mise.jdx.dev) installed, `mise install` in the checkout gets
+it, Bundler included.
+
 `bundle exec rake test` uses the tmux on your `PATH`.
 `bundle exec rake test:tmux` builds each tmux version CI tests (3.2a, the
 newest release of each later minor version, and the development branch)

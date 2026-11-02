@@ -1,0 +1,3 @@
+[tools]
+# The Ruby CI packages and releases with; the gem supports 3.2 and newer.
+ruby = "3.4"
