@@ -90,7 +90,7 @@ class PluginsTest < Minitest::Test
 
     Dir.mktmpdir do |dir|
       assert_equal <<~TMUX, Tmux.load_file(config_using(dir, "tmux-greeter", "TmuxGreeter")).to_tmux
-        # --- TmuxGreeter (#{File.join(@root, "tpm/tmux-greeter/lib/tmux-greeter.rb")}) ---
+        # --- TmuxGreeter (#{File.realpath(File.join(@root, "tpm/tmux-greeter/lib/tmux-greeter.rb"))}) ---
         set-option -g @greeting "hello"
       TMUX
     end
@@ -110,7 +110,7 @@ class PluginsTest < Minitest::Test
 
       assert_equal 0, status, stderr.string
       assert_equal <<~TMUX, stdout.string
-        # --- TmuxHello (#{File.join(@root, "src/tmux-hello/lib/tmux-hello.rb")}) ---
+        # --- TmuxHello (#{File.realpath(File.join(@root, "src/tmux-hello/lib/tmux-hello.rb"))}) ---
         set-option -g @greeting "hi"
       TMUX
     end
