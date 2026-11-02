@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-02)
 
 ### Library
 
@@ -14,6 +14,8 @@
   splices in, naming the component and the file that defines its
   `to_config`, so the generated config shows where each part begins.
   `append` still splices without one.
+  This changes the output of configurations that use `use`: regenerate
+  any compiled config you compare against a checked-in copy.
 - `Tmux.segments` holds named format blocks that compile, in order, to one
   format. `insert` (`before:`/`after:`), `replace`, and `remove` adjust them
   by name, so one part of a configuration can change a status line another
